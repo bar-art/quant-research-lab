@@ -155,6 +155,19 @@ class PaperBook:
                 quantity = abs(delta)
                 duty = self.stamp_duty_rate(day) if side == "sell" else 0.0
                 price = float(row.open) * (1 + self.slippage * (1 if side == "buy" else -1))
+                # 含滑点的最终成交价也必须在涨跌停之内：越界即拒单（保守），不裁剪成更有利的价格。
+                if not row.price_limit_exempt and (
+                    (side == "buy" and price > float(row.up_limit) + 1e-8)
+                    or (side == "sell" and price < float(row.down_limit) - 1e-8)
+                ):
+                    self.blocks.append(
+                        {
+                            "date": str(day),
+                            "symbol": symbol,
+                            "reason": "limit_breached_after_slippage",
+                        }
+                    )
+                    continue
                 if side == "sell":
                     sellable = sum(q for bought_on, q in self.lots[symbol] if bought_on < day)
                     if quantity > sellable + 1e-9:

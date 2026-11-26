@@ -83,3 +83,32 @@ def test_cash_and_finite_guard():
     for targets in [{"A": np.nan}, {"A": -1.0}, {"A": float("inf")}, {"A": 2.0}]:
         with pytest.raises(ValueError):
             book.rebalance(targets, bar(), date(2024, 1, 4), market_time(date(2024, 1, 3)))
+
+
+def test_slippage_never_fills_beyond_price_limits():
+    """审查反例：open=10.99、涨停11、滑点20bps，含滑点买价11.012越过涨停，必须拒单。"""
+    day0, day1, day2 = date(2024, 1, 2), date(2024, 1, 3), date(2024, 1, 4)
+    near_up = bar(open=10.99, close=10.99, up_limit=11.0, down_limit=9.0, price_limit_exempt=False)
+    book = PaperBook(commission_bps=5, slippage_bps=20, initial_cash=100000)
+    book.rebalance({"A": 0.5}, near_up, day1, market_time(day0))
+    assert book.trades == [] and book.cash == 100000  # 无成交不收费
+    assert book.blocks[-1]["reason"] == "limit_breached_after_slippage"
+    # 滑点后仍在涨停以内：正常成交，手续费可手算。
+    ok = bar(open=10.0, close=10.0, up_limit=11.0, down_limit=9.0, price_limit_exempt=False)
+    book.rebalance({"A": 0.5}, ok, day1, market_time(day0))
+    fill = book.trades[-1]
+    assert fill["price"] == pytest.approx(10.02) and fill["price"] <= 11.0
+    assert book.cash == pytest.approx(100000 - fill["quantity"] * 10.02 * 1.0005)
+    # 卖出：开盘9.01高于跌停9，但滑点后8.99低于跌停，拒单且持仓不变。
+    near_down = bar(open=9.01, close=9.01, up_limit=11.0, down_limit=9.0, price_limit_exempt=False)
+    held = book.quantity("A")
+    book.rebalance({}, near_down, day2, market_time(day1))
+    assert (
+        book.quantity("A") == held and book.blocks[-1]["reason"] == "limit_breached_after_slippage"
+    )
+    assert all(t["side"] == "buy" for t in book.trades)
+    # 豁免涨跌幅的证券不受此约束。
+    exempt = bar(open=10.99, close=10.99, up_limit=11.0)
+    fresh = PaperBook(commission_bps=0, slippage_bps=20)
+    fresh.rebalance({"A": 0.5}, exempt, day1, market_time(day0))
+    assert fresh.trades and fresh.trades[0]["price"] > 11.0
