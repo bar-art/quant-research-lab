@@ -1,0 +1,38 @@
+{
+  "reviewed_at": "2026-11-24",
+  "repository": "https://github.com/yebof/quant-agent",
+  "tree_sha": "8508d3901baca04b5c88f81a664a66135cabdf01",
+  "inspected_files": [
+    {
+      "path": "src/models.py",
+      "sha": "afce91a3285c1a34934152327511432ae237b800",
+      "url": "https://github.com/yebof/quant-agent/blob/main/src/models.py"
+    },
+    {
+      "path": "src/risk/rules.py",
+      "sha": "50828ba3f01c4f2e15dd69e218e3de899a0992cc",
+      "url": "https://github.com/yebof/quant-agent/blob/main/src/risk/rules.py"
+    },
+    {
+      "path": "src/evolution/prompt_editor.py",
+      "sha": "5ad2b26db9def500da8b7255161eab60811fd07d",
+      "url": "https://github.com/yebof/quant-agent/blob/main/src/evolution/prompt_editor.py"
+    },
+    {
+      "path": "LICENSE",
+      "sha": "f5ca9d0ed2ed5c2e180ab0c27fcd6e74e786f3d4",
+      "url": "https://github.com/yebof/quant-agent/blob/main/LICENSE"
+    }
+  ],
+  "paper": "https://arxiv.org/html/2510.04643v1",
+  "search": {
+    "query": "quant agent",
+    "method": "GitHub connector repository search; search webpage unavailable",
+    "readme_samples": [
+      "LLMQuant/quant-mind",
+      "OpenByteInc/QuantDinger",
+      "0xethanq/astra-quant-agent"
+    ]
+  },
+  "scope": "Selected documentation and source excerpts; not a full audit or replication."
+}

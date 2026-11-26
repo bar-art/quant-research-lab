@@ -1,0 +1,8 @@
+{
+  "kind": "synthetic",
+  "source": "人工随机样本 seed=42；工作日不是真实交易日历",
+  "historical_universe_complete": false,
+  "corporate_actions_complete": false,
+  "execution_model": "fractional_next_open_research",
+  "timezone": "Asia/Shanghai"
+}

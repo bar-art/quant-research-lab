@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools==79.0.1"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "quant-research-lab"
+version = "0.1.0"
+description = "Evidence-first, point-in-time multi-role quantitative research laboratory"
+requires-python = ">=3.11"
+dependencies = ["numpy==2.4.6", "pandas==3.1.1", "pydantic==2.14.3"]
+[project.optional-dependencies]
+tushare = ["tushare==1.4.29"]
+[project.scripts]
+quant-lab = "quant_research_lab.cli:main"
+[tool.setuptools.packages.find]
+where = ["src"]
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", ".python", "output"]
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+[tool.ruff.lint.per-file-ignores]
+"src/quant_research_lab/reporting.py" = ["E501"]
+"src/quant_research_lab/comparison_report.py" = ["E501"]
+[tool.mypy]
+python_version = "3.11"
+strict = true
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--cov=quant_research_lab --cov-report=term-missing --cov-fail-under=80"
