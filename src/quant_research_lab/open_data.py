@@ -12,6 +12,7 @@ from typing import Any
 from .data import MarketDataset
 from .data_bundle import write_bundle
 
+ASHARE_DIRS = ("ashare-data-pipeline", "a-share-quant-agent")
 DEFAULT_CODES = ["000001.SZ", "300750.SZ", "600000.SH", "600518.SH", "600519.SH", "688981.SH"]
 CACHE_CHECK = """
 import json,sys
@@ -67,10 +68,12 @@ def run_pipeline(
     import os
 
     workspace, output = workspace.resolve(), output.resolve()
-    ashare, quant, alpha = [
-        workspace / name
-        for name in ["a-share-quant-agent", "quant-research-lab", "alpha-evidence-lab"]
-    ]
+    # 数据仓库已更名为 ashare-data-pipeline；本地仍叫旧名 a-share-quant-agent 的目录也可用。
+    ashare = next(
+        (workspace / name for name in ASHARE_DIRS if (workspace / name).is_dir()),
+        workspace / ASHARE_DIRS[0],
+    )
+    quant, alpha = workspace / "quant-research-lab", workspace / "alpha-evidence-lab"
     if output.exists() and any(output.iterdir()):
         raise ValueError("Use a new output directory")
     for root in [ashare, quant, alpha]:

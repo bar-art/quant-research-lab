@@ -1,6 +1,6 @@
 # 跨项目数据包（可选）
 
-`scripts/run_open_data.sh` 是给"三个项目并列放在同一目录"这种用法准备的便捷脚本：它读取 a-share-quant-agent 的本地 BaoStock 缓存，生成带文件哈希的 `research_bundle_v1` 数据包，再分别交给本项目和 alpha-evidence-lab 运行。单独使用本项目时不需要它，直接用 CSV + manifest 即可。
+`scripts/run_open_data.sh` 是给"三个项目并列放在同一目录"这种用法准备的便捷脚本：它读取 ashare-data-pipeline 的本地 BaoStock 缓存（目录名为 `ashare-data-pipeline` 或旧名 `a-share-quant-agent` 均可），生成带文件哈希的 `research_bundle_v1` 数据包，再分别交给本项目和 alpha-evidence-lab 运行。单独使用本项目时不需要它，直接用 CSV + manifest 即可。
 
 ```bash
 # 三个项目并列放置，并分别安装好各自的 .venv
@@ -25,7 +25,7 @@ bash scripts/run_open_data.sh --export-only          # 只导出数据包
 
 ## Yahoo Finance
 
-Yahoo 数据缺少停牌、历史 ST 和涨跌停信息，不能直接用于本项目的 A 股撮合；a-share-quant-agent 只把它用作价格核对来源。yfinance 是调用 Yahoo 公共接口的开源工具，不是官方客户端，使用前应按用途核对其条款。
+Yahoo 数据缺少停牌、历史 ST 和涨跌停信息，不能直接用于本项目的 A 股撮合；ashare-data-pipeline 只把它用作价格核对来源。yfinance 是调用 Yahoo 公共接口的开源工具，不是官方客户端，使用前应按用途核对其条款。
 
 ## 研究边界
 

@@ -1,5 +1,7 @@
 # Quant Research Lab
 
+[![tests](https://github.com/bar-art/quant-research-lab/actions/workflows/tests.yml/badge.svg)](https://github.com/bar-art/quant-research-lab/actions/workflows/tests.yml)
+
 **先验证研究证据，再讨论模型能力。**
 
 一个独立的多角色量化研究 MVP：四角色委员会、滚动样本外检验、训练收益情景模拟、确定性风控、下一开盘模拟账本、到期预测反馈和可复现报告。
@@ -126,7 +128,7 @@ quant-lab demo --ollama --output output/local-model
 
 ## 实测：沪深300历史成分 2015-2026（2026-11-26）
 
-输入由 `a-share-quant-agent` 从 Tushare 本地快照导出：668 只曾经的成分股（含之后调出和退市的），1,737,796 行日线，逐日 `universe_member` 来自 143 次月度成分快照，后复权价格，涨跌停按板块规则计算。
+输入由 `ashare-data-pipeline` 从 Tushare 本地快照导出：668 只曾经的成分股（含之后调出和退市的），1,737,796 行日线，逐日 `universe_member` 来自 143 次月度成分快照，后复权价格，涨跌停按板块规则计算。
 
 ```bash
 quant-lab research --input <export>/bars.csv --manifest <export>/manifest.json \
@@ -154,7 +156,7 @@ sh scripts/verify.sh
 
 ## 研究边界
 
-这是使用碎股和统一手续费/滑点的**研究模拟**，不是完整 A 股回测引擎。板块涨跌停规则由数据端（a-share-quant-agent）计算后导入，印花税可按日期分段；尚未实现 100 股交易单位、最低佣金、公司行动现金流、完整退市终值、财务 PIT 和新闻模块。报告会保留这些局限。bootstrap 不是未来收益保证，四个角色不意味着四个独立信息源，简单规则演示不证明大模型具有收益优势。
+这是使用碎股和统一手续费/滑点的**研究模拟**，不是完整 A 股回测引擎。板块涨跌停规则由数据端（ashare-data-pipeline）计算后导入，印花税可按日期分段；尚未实现 100 股交易单位、最低佣金、公司行动现金流、完整退市终值、财务 PIT 和新闻模块。报告会保留这些局限。bootstrap 不是未来收益保证，四个角色不意味着四个独立信息源，简单规则演示不证明大模型具有收益优势。
 
 未来可以在已有框架上扩展国内数据适配器、完整A股撮合、前瞻模型纸面实验、行业/风格风控和受控记忆策略。当前没有实盘下单、自动改提示词或强化学习训练。
 
@@ -164,8 +166,8 @@ sh scripts/verify.sh
 
 本项目只读取有文档说明的 CSV + manifest，不依赖任何特定数据商，可以单独克隆运行。
 
-- **推荐：** 由同作者的 [a-share-quant-agent](https://github.com/bar-art/a-share-quant-agent) 导出。它整理停牌、ST、昨收、按板块规则计算的涨跌停价和历史指数成分（含已退市股票），并与第二数据源逐日核对。上面的沪深300实测就是这样得到的。
+- **推荐：** 由同作者的 [ashare-data-pipeline](https://github.com/bar-art/ashare-data-pipeline) 导出。它整理停牌、ST、昨收、按板块规则计算的涨跌停价和历史指数成分（含已退市股票），并与第二数据源逐日核对。上面的沪深300实测就是这样得到的。
 - **自有数据：** 只要满足 [使用自己的数据](#使用自己的数据) 中的字段要求即可。
-- **跨项目脚本（可选）：** `scripts/run_open_data.sh` 假设三个项目并列放在同一目录，用 a-share-quant-agent 的本地缓存生成哈希校验的数据包，再分别交给本项目和 alpha-evidence-lab 运行，详见 [跨项目数据包](docs/open_data.md)。单独使用本项目时不需要它。
+- **跨项目脚本（可选）：** `scripts/run_open_data.sh` 假设三个项目并列放在同一目录，用 ashare-data-pipeline 的本地缓存生成哈希校验的数据包，再分别交给本项目和 alpha-evidence-lab 运行，详见 [跨项目数据包](docs/open_data.md)。单独使用本项目时不需要它。
 
 数据文件和模型调用记录都在 `output/`、`data/` 下，不提交到仓库；数据商的数据请按其许可自行获取。

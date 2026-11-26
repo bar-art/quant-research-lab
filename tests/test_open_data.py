@@ -7,8 +7,8 @@ from quant_research_lab.data_bundle import load_quant_bundle, write_bundle
 from quant_research_lab.open_data import run_pipeline
 
 
-def workspace(tmp_path):
-    for name in ["a-share-quant-agent", "quant-research-lab", "alpha-evidence-lab"]:
+def workspace(tmp_path, ashare="a-share-quant-agent"):
+    for name in [ashare, "quant-research-lab", "alpha-evidence-lab"]:
         python = tmp_path / name / ".venv" / "bin" / "python"
         python.parent.mkdir(parents=True)
         python.touch()
@@ -64,3 +64,13 @@ def test_bundle_writer_does_not_overwrite_existing_data(tmp_path, dataset):
     write_bundle(dataset, output)
     with pytest.raises(ValueError, match="new"):
         write_bundle(dataset, output)
+
+
+@pytest.mark.parametrize("folder", ["ashare-data-pipeline", "a-share-quant-agent"])
+def test_data_repository_found_under_new_or_old_folder_name(tmp_path, monkeypatch, dataset, folder):
+    root = workspace(tmp_path / "workspace", ashare=folder)
+    calls = exporter(monkeypatch, dataset)
+    run_pipeline(
+        root, tmp_path / "out", list(dataset.symbols), "2020-01-02", "2024-12-31", export_only=True
+    )
+    assert calls[0][0] == str(root.resolve() / folder / ".venv" / "bin" / "python")

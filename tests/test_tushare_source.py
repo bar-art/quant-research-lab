@@ -118,6 +118,9 @@ def raw_archive(directory):
 
 def test_actual_two_project_contract_and_visibility(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[2]
+    # 跨项目契约测试只在相邻仓库存在时运行；单独克隆（如 CI）时跳过。
+    if not (root / "alpha-evidence-lab" / "src").is_dir():
+        pytest.skip("未找到相邻仓库 alpha-evidence-lab，跳过跨项目契约测试")
     monkeypatch.syspath_prepend(str(root / "alpha-evidence-lab" / "src"))
     from alpha_evidence_lab.bundle import load_bundle
 

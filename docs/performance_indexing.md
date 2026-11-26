@@ -8,7 +8,7 @@ Remaining: whole-study scaling benchmarks, LLM interruption/resume, daily histor
 
 ## Whole-study benchmark — 2026-11-26
 
-Workload: HS300 historical universe from the a-share-quant-agent Tushare snapshot, 668 symbols (including later removals and delistings), 1,737,796 daily rows, 2015-01-05 to 2026-11-24, 141 rolling test folds, 423 candidate evaluations, rule backend.
+Workload: HS300 historical universe from the ashare-data-pipeline Tushare snapshot, 668 symbols (including later removals and delistings), 1,737,796 daily rows, 2015-01-05 to 2026-11-24, 141 rolling test folds, 423 candidate evaluations, rule backend.
 
 | Version | Wall time | Output |
 |---|---|---|

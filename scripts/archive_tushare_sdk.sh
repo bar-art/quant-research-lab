@@ -14,7 +14,9 @@ if [[ -z "${TUSHARE_BASE_URL:-}" ]]; then
 fi
 export TUSHARE_BASE_URL
 trap 'unset TUSHARE_TOKEN' EXIT
-sdk_python="${TUSHARE_PYTHON:-../a-share-quant-agent/.venv/bin/python}"
+default_sdk="../ashare-data-pipeline/.venv/bin/python"
+[ -x "$default_sdk" ] || default_sdk="../a-share-quant-agent/.venv/bin/python"  # 旧目录名
+sdk_python="${TUSHARE_PYTHON:-$default_sdk}"
 export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 "$sdk_python" -m quant_research_lab.tushare_source archive \
   --transport sdk --allow-http --request-timeout 60 "$@"
