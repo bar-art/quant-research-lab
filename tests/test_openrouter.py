@@ -109,9 +109,13 @@ def test_budgets_missing_key_and_bad_output(dataset):
         api_key="test-key",
         transport=fake_transport([], cost=0.002),
     )
-    costly.generate("risk", data, AgentNote)
-    with pytest.raises(RuntimeError, match="费用"):
+    # 单次就超过上限：已付费调用写入审计，但不被接受，之后不再发送。
+    with pytest.raises(RuntimeError, match="budget_exceeded"):
         costly.generate("risk", data, AgentNote)
+    assert costly.audit[-1]["status"] == "budget_exceeded" and costly.cost_usd == 0.002
+    with pytest.raises(RuntimeError, match="budget_exceeded"):
+        costly.generate("risk", data, AgentNote)
+    assert costly.calls == 1
     with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         OpenRouterModel("openai/gpt-oss-120b", api_key="").generate("risk", data, AgentNote)
     broken = OpenRouterModel(
@@ -124,7 +128,7 @@ def test_budgets_missing_key_and_bad_output(dataset):
     assert broken.calls == 3
     with pytest.raises(ValueError):
         OpenRouterModel("no-provider-prefix")
-    unknown = OpenRouterModel("openai/other", api_key="k", transport=fake_transport([]))
+    unknown = OpenRouterModel("openai/other", api_key="test-key", transport=fake_transport([]))
     with pytest.raises(ValueError, match="目录"):
         unknown.metadata()
 
@@ -241,3 +245,113 @@ def test_unsupported_sampling_parameters_are_not_sent(dataset):
     assert "temperature" not in model.metadata()["details"]["supported_parameters"]
     model.generate("risk", payload(dataset), AgentNote)
     assert "temperature" not in sent[0] and sent[0]["seed"] == 42
+
+
+ENDPOINTS = {
+    "data": {
+        "endpoints": [
+            {
+                "tag": "openai/flex",
+                "provider_name": "OpenAI",
+                "pricing": {"prompt": "0.000001", "completion": "0.00001"},
+            },
+            {
+                "tag": "openai",
+                "provider_name": "OpenAI",
+                "pricing": {"prompt": "0.000002", "completion": "0.00002"},
+            },
+        ]
+    }
+}
+
+
+def priced_transport(sent, cost=0.0001, usage=None):
+    base = fake_transport(sent, cost=cost)
+
+    def transport(path, body, api_key):
+        if body is None and path.endswith("/endpoints"):
+            return ENDPOINTS
+        envelope = base(path, body, api_key)
+        if usage is not None and body is not None:
+            envelope["usage"] = usage
+        return envelope
+
+    return transport
+
+
+def test_reservation_is_a_hard_cap(dataset):
+    sent: list[dict] = []
+    model = OpenRouterModel(
+        "openai/gpt-oss-120b",
+        max_calls=9,
+        max_cost_usd=1.0,
+        api_key="test-key",
+        transport=priced_transport(sent),
+        provider="openai/flex",
+    )
+    details = model.metadata()["details"]
+    assert details["budget_mode"] == "hard_reservation"
+    assert model.pricing == {"prompt": 1e-6, "completion": 1e-5}  # 固定端点取该端点价格
+    model.generate("risk", payload(dataset), AgentNote)
+    reserve = model.reservation(sent[0])
+    assert reserve is not None and reserve >= 4000 * 1e-5
+    tight = OpenRouterModel(
+        "openai/gpt-oss-120b",
+        max_calls=9,
+        max_cost_usd=reserve / 2,
+        api_key="test-key",
+        transport=priced_transport([]),
+        provider="openai/flex",
+    )
+    tight.metadata()
+    with pytest.raises(RuntimeError, match="未发送"):
+        tight.generate("risk", payload(dataset), AgentNote)
+    assert tight.calls == 0
+
+
+@pytest.mark.parametrize("usage", [{}, {"cost": -1}, {"cost": float("nan")}, {"cost": "0.1"}])
+def test_unknown_cost_is_reserved_or_stops(dataset, usage):
+    priced = OpenRouterModel(
+        "openai/gpt-oss-120b",
+        max_calls=9,
+        api_key="test-key",
+        transport=priced_transport([], usage=usage),
+    )
+    priced.metadata()
+    priced.generate("risk", payload(dataset), AgentNote)
+    assert priced.unknown_cost_calls == 1 and priced.committed_cost() > 0
+    assert priced.audit[-1]["cost_status"] == "unknown"
+    unpriced = OpenRouterModel(
+        "openai/gpt-oss-120b",
+        max_calls=9,
+        api_key="test-key",
+        transport=priced_transport([], usage=usage),
+    )
+    with pytest.raises(RuntimeError, match="budget_exceeded"):
+        unpriced.generate("risk", payload(dataset), AgentNote)
+
+
+def test_http_errors_are_not_repaired_and_never_echo_body(dataset, monkeypatch):
+    import io
+    import urllib.error
+
+    from quant_research_lab import openrouter
+
+    secret = "sk-or-v1-SECRET-in-provider-error"
+
+    def fail(request, timeout):
+        raise urllib.error.HTTPError(
+            "https://openrouter.ai",
+            500,
+            "boom",
+            {"x-request-id": "req-9"},
+            io.BytesIO(f"echo {secret}".encode()),
+        )
+
+    monkeypatch.setattr(openrouter.urllib.request, "urlopen", fail)
+    model = OpenRouterModel("openai/gpt-oss-120b", max_calls=9, api_key=secret)
+    with pytest.raises(openrouter.TransportError) as caught:
+        model.generate("risk", payload(dataset), AgentNote)
+    assert secret not in str(caught.value) and "provider_error" in str(caught.value)
+    assert model.calls == 1 and model.audit[-1]["status"] == "error"  # 不当作格式错误重试
+    assert secret not in json.dumps(model.audit)

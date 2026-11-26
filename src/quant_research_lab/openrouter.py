@@ -6,6 +6,7 @@ OpenRouter 可能把同一模型路由到不同服务商；实际服务商逐次
 
 import hashlib
 import json
+import math
 import os
 import time
 import urllib.error
@@ -25,6 +26,32 @@ API = "https://openrouter.ai/api/v1"
 Transport = Callable[[str, dict[str, Any] | None, str], dict[str, Any]]
 
 
+class TransportError(RuntimeError):
+    """网络或服务商错误：不是模型输出问题，不进入格式修复重试。"""
+
+
+def valid_cost(value: Any) -> float | None:
+    """usage.cost 的合法值；缺失、非数值、负数、NaN/Inf 返回 None（未知，不当成 0）。"""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    cost = float(value)
+    return cost if math.isfinite(cost) and cost >= 0 else None
+
+
+def http_error_category(code: int, flagged: bool) -> str:
+    if flagged:
+        return "content_filter"
+    if code in {401, 403}:
+        return "authentication"
+    if code == 402:
+        return "insufficient_credits"
+    if code in {408, 429}:
+        return "rate_limit_or_timeout"
+    if code >= 500:
+        return "provider_error"
+    return "request_rejected"
+
+
 def http_transport(path: str, body: dict[str, Any] | None, api_key: str) -> dict[str, Any]:
     headers = {"Content-Type": "application/json"}
     if body is not None:
@@ -39,8 +66,12 @@ def http_transport(path: str, body: dict[str, Any] | None, api_key: str) -> dict
         with urllib.request.urlopen(request, timeout=180) as response:
             raw = response.read(20_000_001)
     except urllib.error.HTTPError as error:
-        detail = error.read().decode(errors="replace")[:200]
-        raise ValueError(f"OpenRouter HTTP {error.code}：{detail}") from None
+        # 只报告状态码、安全分类和请求ID：服务商错误正文可能回显密钥或提示词。
+        text = error.read().decode(errors="replace")
+        request_id = error.headers.get("x-request-id") if error.headers else None
+        category = http_error_category(error.code, error.code == 400 and "flagged" in text)
+        suffix = f"，请求ID {request_id}" if request_id else ""
+        raise TransportError(f"OpenRouter HTTP {error.code}（{category}）{suffix}") from None
     if len(raw) > 20_000_000:
         raise ValueError("OpenRouter 响应超出大小限制")
     return dict(json.loads(raw))
@@ -160,6 +191,11 @@ class OpenRouterModel:
         self.expected_digest: str | None = None
         # 由 metadata() 从公开目录读取；推理型模型（如 gpt-5-nano）不接受 temperature。
         self.supported: set[str] | None = None
+        # 由 metadata() 从端点目录读取（美元/token）；有价格时按最坏情况预留，是硬上限。
+        self.pricing: dict[str, float] | None = None
+        self.unknown_cost_calls = 0
+        self.unknown_cost_reserved = 0.0
+        self.budget_exceeded = False
         self.audit: list[dict[str, Any]] = []
 
     def metadata(self) -> dict[str, Any]:
@@ -169,6 +205,7 @@ class OpenRouterModel:
                 slug = str(item.get("canonical_slug") or item["id"])
                 if item.get("supported_parameters"):
                     self.supported = set(item["supported_parameters"])
+                self.pricing = self._endpoint_pricing()
                 return {
                     "name": item["id"],
                     "digest": "openrouter-slug:" + slug,
@@ -179,9 +216,43 @@ class OpenRouterModel:
                         "pricing": item.get("pricing"),
                         "digest_kind": "provider_catalog_slug_not_weight_hash",
                         "supported_parameters": sorted(self.supported or []),
+                        "budget_pricing_usd_per_token": self.pricing,
+                        "budget_mode": "hard_reservation" if self.pricing else "soft_threshold",
                     },
                 }
         raise ValueError("OpenRouter 目录中没有该模型；不会自动换模型")
+
+    def _endpoint_pricing(self) -> dict[str, float] | None:
+        """固定端点时取该端点单价，否则取所有端点最高价；读不到则返回 None（软阈值）。"""
+        try:
+            endpoints = self.transport(f"/models/{self.model}/endpoints", None, "")["data"][
+                "endpoints"
+            ]
+            matches = [
+                item
+                for item in endpoints
+                if self.provider is None
+                or item.get("tag") == self.provider
+                or str(item.get("provider_name", "")).lower() == self.provider.lower()
+            ]
+            return {
+                "prompt": max(float(item["pricing"]["prompt"]) for item in matches),
+                "completion": max(float(item["pricing"]["completion"]) for item in matches),
+            }
+        except (TransportError, KeyError, TypeError, ValueError):
+            return None
+
+    def committed_cost(self) -> float:
+        return self.cost_usd + self.unknown_cost_reserved
+
+    def reservation(self, body: dict[str, Any]) -> float | None:
+        """单次请求最坏费用：请求字符数（token数不超过字符数）× 输入单价 + 输出上限 × 输出单价。"""
+        if self.pricing is None:
+            return None
+        chars = len(json.dumps(body["messages"], ensure_ascii=False)) + len(
+            json.dumps(body["response_format"], ensure_ascii=False)
+        )
+        return chars * self.pricing["prompt"] + int(body["max_tokens"]) * self.pricing["completion"]
 
     def _journal(self, event: dict[str, Any]) -> None:
         self.audit.append(event)
@@ -216,11 +287,10 @@ class OpenRouterModel:
             },
         }
         for repair in range(self.max_repairs + 1):
+            if self.budget_exceeded:
+                raise RuntimeError("已超过费用上限（budget_exceeded），不再发送付费请求")
             if self.calls >= self.max_calls:
                 raise RuntimeError("模型调用预算已用完")
-            if self.cost_usd >= self.max_cost_usd:
-                raise RuntimeError(f"模型费用达到上限 ${self.max_cost_usd}，停止运行")
-            self.calls += 1
             body: dict[str, Any] = {
                 "model": self.model,
                 "messages": messages,
@@ -233,6 +303,15 @@ class OpenRouterModel:
             for name, value in (("temperature", 0), ("seed", self.seed)):
                 if self.supported is None or name in self.supported:
                     body[name] = value
+            reserve = self.reservation(body)
+            if reserve is not None:
+                if self.committed_cost() + reserve > self.max_cost_usd:
+                    raise RuntimeError(
+                        f"预留最坏费用 ${reserve:.6f} 后将超过上限 ${self.max_cost_usd}，请求未发送"
+                    )
+            elif self.committed_cost() >= self.max_cost_usd:
+                raise RuntimeError(f"模型费用达到上限 ${self.max_cost_usd}，停止运行")
+            self.calls += 1
             started = time.monotonic()
             event: dict[str, Any] = {
                 "role": role,
@@ -256,14 +335,36 @@ class OpenRouterModel:
             try:
                 envelope = self.transport("/chat/completions", body, self._api_key)
                 usage = envelope.get("usage") or {}
-                self.cost_usd += float(usage.get("cost") or 0.0)
+                cost = valid_cost(usage.get("cost"))
+                if cost is None:
+                    # 费用未知：不当成 0。有可信上界时按预留额计入，否则无法保证上限。
+                    self.unknown_cost_calls += 1
+                    if reserve is None:
+                        self.budget_exceeded = True
+                    else:
+                        self.unknown_cost_reserved += reserve
+                else:
+                    self.cost_usd += cost
+                if self.committed_cost() > self.max_cost_usd:
+                    self.budget_exceeded = True
                 event.update(
                     provider=envelope.get("provider"),
                     served_model=envelope.get("model"),
                     prompt_tokens=usage.get("prompt_tokens"),
                     completion_tokens=usage.get("completion_tokens"),
-                    cost_usd=usage.get("cost"),
+                    cost_usd=cost,
+                    cost_status="settled" if cost is not None else "unknown",
                 )
+                if self.budget_exceeded:
+                    # 已付费的响应写入审计，但不作为预算内结果使用；比较不完整。
+                    event["raw_content"] = str(
+                        ((envelope.get("choices") or [{}])[0].get("message") or {}).get("content")
+                    )
+                    event["status"] = "budget_exceeded"
+                    raise RuntimeError(
+                        f"费用 ${self.committed_cost():.6f} 超过上限 ${self.max_cost_usd}"
+                        "（budget_exceeded）；已发生的调用已记录，比较不完整"
+                    )
                 content = str(envelope["choices"][0]["message"]["content"] or "")
                 event["raw_content"] = content
                 result = schema.model_validate(from_strict(json.loads(content), manager))
@@ -297,7 +398,8 @@ class OpenRouterModel:
                     },
                 ]
             except Exception as error:
-                event.update(status="error", error_type=type(error).__name__)
+                if event.get("status") != "budget_exceeded":
+                    event.update(status="error", error_type=type(error).__name__)
                 raise
             finally:
                 event["elapsed_seconds"] = time.monotonic() - started
